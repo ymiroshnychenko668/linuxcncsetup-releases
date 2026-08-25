@@ -65,8 +65,16 @@ cleanup() {
 trap cleanup EXIT
 zstd --quiet --test "$asset"
 rm -f -- "$temporary_tar"
+case "${metadata[0]}" in
+    remoteterminal) tar_maximum=$((101 << 20)) ;;
+    websetupmanager) tar_maximum=$((259 << 20)) ;;
+    *)
+        printf 'unsupported product in release manifest\n' >&2
+        exit 1
+        ;;
+esac
 python3 "$repository_dir/scripts/decompress-zstd.py" \
-    "$asset" "$temporary_tar" --maximum $((5 << 30))
+    "$asset" "$temporary_tar" --maximum "$tar_maximum"
 python3 "$repository_dir/scripts/create-manifest.py" \
     --product "${metadata[0]}" \
     --version "${metadata[1]}" \

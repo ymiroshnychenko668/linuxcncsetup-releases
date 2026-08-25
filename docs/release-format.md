@@ -40,6 +40,27 @@ devices, traversal, duplicates, control characters, and mode/ownership drift
 are rejected before publication. The TUI independently rejects unsafe archive
 entries while extracting the signed payload.
 
+The raw tar is canonical USTAR in the exact inventory order. Only physical
+regular-file type flags (`0` and the legacy NUL spelling) and directory type
+`5` are accepted; PAX/GNU extension headers and non-canonical trailing records
+are rejected. Every required file must be non-empty. Remote Terminal bounds
+each of its application and `ttyd` binaries at 100 MiB, its build metadata and
+license at 1 MiB, its inner manifest at 128 KiB, and the sum of all regular
+files at 100 MiB. Web Setup Manager bounds its binary at 256 MiB, both JSON
+files at 1 MiB, and their total regular-file size at 258 MiB.
+
+Before signing, the public workflow independently parses both inner JSON files
+with duplicate-key rejection. It binds their product, strict semantic version,
+Debian target, source commit and timestamp to the checked-out private tag,
+checks every payload size and digest, and validates Web Setup Manager's ordered
+SQLite migration identities and canonical migration-set digest against the
+checked-out SQL files. Remote Terminal's source-tree, release-input and pinned
+toolchain identities are likewise recomputed from its checkout. Executables
+must be structurally valid ELF64 little-endian AMD64 files with an executable
+load segment. The component build output is exactly the asset plus a canonical
+one-line `.sha256` sidecar; additional
+scratch output is rejected.
+
 To verify downloaded assets locally (requires Python 3, OpenSSL, and zstd):
 
 ```sh

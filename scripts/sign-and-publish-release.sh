@@ -14,7 +14,8 @@ source_dir=$(cd -- "$3" && pwd)
 dist_dir=$(cd -- "$4" && pwd)
 repository_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 [[ "$component" == remoteterminal || "$component" == websetupmanager ]]
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]
+semver_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+[[ "$version" =~ $semver_pattern ]]
 [[ -n "${RELEASE_SIGNING_PRIVATE_KEY:-}" ]] || {
     printf 'RELEASE_SIGNING_PRIVATE_KEY is unavailable\n' >&2
     exit 1
@@ -22,6 +23,12 @@ repository_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 source_tag="v${version}"
 source_commit=$(git -C "$source_dir" rev-parse --verify HEAD)
+source_epoch=$(git -C "$source_dir" show -s --format=%ct "$source_commit")
+if [[ "$component" == remoteterminal ]]; then
+    tar_maximum=$((101 << 20))
+else
+    tar_maximum=$((259 << 20))
+fi
 git -C "$source_dir" tag --points-at "$source_commit" | grep -Fx -- "$source_tag" >/dev/null
 release_tag="${component}-v${version}"
 if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -44,10 +51,6 @@ done
     printf 'signature output already exists\n' >&2
     exit 1
 }
-(
-    cd "$dist_dir"
-    sha256sum --check --status "$(basename -- "$sidecar")"
-)
 
 work_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/linuxcnc-sign.XXXXXX")
 cleanup() {
@@ -56,12 +59,15 @@ cleanup() {
 trap cleanup EXIT
 tar_path="$work_dir/payload.tar"
 python3 "$repository_dir/scripts/decompress-zstd.py" \
-    "$asset" "$tar_path" --maximum $((5 << 30))
+    "$asset" "$tar_path" --maximum "$tar_maximum"
 canonical_manifest="$work_dir/manifest.json"
 asset_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$release_tag/$asset_name"
 python3 "$repository_dir/scripts/create-manifest.py" \
     --product "$component" --version "$version" --asset "$asset" \
-    --tar "$tar_path" --url "$asset_url" --output "$canonical_manifest"
+    --sidecar "$sidecar" --tar "$tar_path" --url "$asset_url" \
+    --source-commit "$source_commit" --source-date-epoch "$source_epoch" \
+    --source-dir "$source_dir" \
+    --output "$canonical_manifest"
 cmp --silent "$manifest" "$canonical_manifest" || {
     printf 'unsigned manifest changed after the isolated build step\n' >&2
     exit 1
@@ -100,4 +106,3 @@ gh release create "$release_tag" \
     --title "$component $version — Debian 13 AMD64" \
     --notes-file "$notes" \
     "$asset" "$sidecar" "$manifest" "$signature"
-
