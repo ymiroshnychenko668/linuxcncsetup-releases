@@ -1,0 +1,73 @@
+name: publish-signed-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Private component to build and publish
+        required: true
+        type: choice
+        options:
+          - remoteterminal
+          - websetupmanager
+      version:
+        description: Existing private source tag without the v prefix (for example 1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: signed-release-${{ inputs.component }}-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Debian 13 AMD64 signed release
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - name: Check out public release controls
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Check out tagged Remote Terminal source
+        if: inputs.component == 'remoteterminal'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ymiroshnychenko668/linuxcncsetup-remoteterminal
+          ref: v${{ inputs.version }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+          ssh-key: ${{ secrets.REMOTETERMINAL_SOURCE_DEPLOY_KEY }}
+
+      - name: Check out tagged Web Setup Manager source
+        if: inputs.component == 'websetupmanager'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ymiroshnychenko668/linuxcncsetup-websetupmanager
+          ref: v${{ inputs.version }}
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+          ssh-key: ${{ secrets.WEBSETUPMANAGER_SOURCE_DEPLOY_KEY }}
+
+      - name: Set up pinned Docker Buildx action
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+
+      - name: Install release verification tools
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends zstd
+
+      - name: Build and validate without signing credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/build-release.sh '${{ inputs.component }}' '${{ inputs.version }}' "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/dist"
+
+      - name: Sign and publish immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_SIGNING_PRIVATE_KEY }}
+        run: ./scripts/sign-and-publish-release.sh '${{ inputs.component }}' '${{ inputs.version }}' "$GITHUB_WORKSPACE/source" "$GITHUB_WORKSPACE/dist"

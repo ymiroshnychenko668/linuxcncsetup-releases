@@ -1,0 +1,42 @@
+name: release-control-tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install archive tooling
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends zstd
+      - name: Check scripts and tests
+        run: |
+          bash -n scripts/*.sh
+          python3 -m py_compile scripts/*.py tests/*.py
+          python3 -m unittest discover -s tests -v
+      - name: Verify keyring matches the PEM public key
+        run: |
+          raw_key=$(openssl pkey -pubin -in keys/release-2026-01.pem -outform DER | tail -c 32 | base64 -w0)
+          python3 - "$raw_key" <<'PY'
+          import json
+          import sys
+          with open("keys/keyring.json", encoding="utf-8") as source:
+              keyring = json.load(source)
+          assert keyring == {
+              "schema": 1,
+              "keys": [{
+                  "id": "release-2026-01",
+                  "algorithm": "ed25519",
+                  "key": sys.argv[1],
+              }],
+          }
+          PY
+
