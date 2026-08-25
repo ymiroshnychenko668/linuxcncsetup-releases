@@ -18,8 +18,8 @@ does not consult a mutable `latest` URL.
 
 The current public key is [`keys/release-2026-01.pem`](keys/release-2026-01.pem).
 Its raw form is also recorded in [`keys/keyring.json`](keys/keyring.json) for the
-Go verifier. The private key is held in the repository's encrypted Actions
-secret and in the maintainer's local macOS Keychain; it is never committed.
+Go verifier. The private key is held in the branch-restricted `release` GitHub
+Environment and in the maintainer's local macOS Keychain; it is never committed.
 
 ## Manual publication
 
@@ -38,4 +38,3 @@ install/update action in the TUI.
 
 See [`docs/release-format.md`](docs/release-format.md) for the wire format and
 local verification command.
-
