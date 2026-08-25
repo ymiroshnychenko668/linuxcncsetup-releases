@@ -890,6 +890,15 @@ class ManifestTests(unittest.TestCase):
             with self.subTest(workflow=workflow, action=action):
                 self.assertRegex(action, r"^[^@\s]+@[0-9a-f]{40}$")
 
+    def test_signer_compares_public_key_identity_as_der(self) -> None:
+        script = (ROOT / "scripts" / "sign-and-publish-release.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('generated_public="$work_dir/release-public.der"', script)
+        self.assertIn('committed_public="$work_dir/committed-public.der"', script)
+        self.assertEqual(script.count("-outform DER"), 2)
+        self.assertNotIn("release-public.pem", script)
+
     def test_bounded_decompressor_rejects_excess_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

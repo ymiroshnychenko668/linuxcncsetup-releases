@@ -76,9 +76,12 @@ cmp --silent "$manifest" "$canonical_manifest" || {
 private_key="$work_dir/release-private.pem"
 printf '%s' "$RELEASE_SIGNING_PRIVATE_KEY" > "$private_key"
 chmod 0600 "$private_key"
-generated_public="$work_dir/release-public.pem"
-openssl pkey -in "$private_key" -pubout -out "$generated_public"
-cmp --silent "$generated_public" "$repository_dir/keys/release-2026-01.pem" || {
+generated_public="$work_dir/release-public.der"
+committed_public="$work_dir/committed-public.der"
+openssl pkey -in "$private_key" -pubout -outform DER -out "$generated_public"
+openssl pkey -pubin -in "$repository_dir/keys/release-2026-01.pem" \
+    -outform DER -out "$committed_public"
+cmp --silent "$generated_public" "$committed_public" || {
     printf 'signing secret does not match the committed public key\n' >&2
     exit 1
 }
