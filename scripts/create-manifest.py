@@ -21,15 +21,23 @@ VERSION = re.compile(
 )
 PRODUCTS = {
     "remoteterminal": {
-        "bin/remoteterminal",
-        "bin/ttyd",
-        "manifest.json",
-        "metadata/build-inputs.json",
+        "bin": ("directory", 0o755),
+        "bin/remoteterminal": ("file", 0o755),
+        "bin/ttyd": ("file", 0o755),
+        "licenses": ("directory", 0o755),
+        "licenses/ttyd-LICENSE": ("file", 0o644),
+        "metadata": ("directory", 0o755),
+        "metadata/build-inputs.json": ("file", 0o644),
+        "manifest.json": ("file", 0o644),
     },
-    "websetupmanager": {"bin/websetupmanager", "manifest.json"},
+    "websetupmanager": {
+        "bin": ("directory", 0o755),
+        "bin/websetupmanager": ("file", 0o755),
+        "metadata": ("directory", 0o755),
+        "metadata/version.json": ("file", 0o644),
+        "manifest.json": ("file", 0o644),
+    },
 }
-ALLOWED_FILE_MODES = {0o444, 0o555, 0o644, 0o755}
-ALLOWED_DIRECTORY_MODES = {0o555, 0o755}
 MAX_ENTRIES = 20_000
 MAX_COMPRESSED_BYTES = 2 << 30
 MAX_UNPACKED_BYTES = 4 << 30
@@ -54,8 +62,7 @@ def safe_name(name: str) -> str:
         or name.startswith("/")
         or "\\" in name
         or "\x00" in name
-        or "\r" in name
-        or "\n" in name
+        or any(ord(character) < 0x20 or ord(character) == 0x7F for character in name)
     ):
         fail(f"unsafe archive path {name!r}")
     trimmed = name[:-1] if name.endswith("/") else name
@@ -66,34 +73,39 @@ def safe_name(name: str) -> str:
 
 
 def validate_tar(tar_path: Path, product: str) -> int:
+    expected = PRODUCTS[product]
     seen: set[str] = set()
-    regular: set[str] = set()
     unpacked = 0
+    entry_count = 0
     with tarfile.open(tar_path, mode="r:") as archive:
-        members = archive.getmembers()
-        if not members or len(members) > MAX_ENTRIES:
-            fail("archive has an invalid entry count")
-        for member in members:
+        for member in archive:
+            entry_count += 1
+            if entry_count > MAX_ENTRIES:
+                fail("archive has too many entries")
             name = safe_name(member.name)
             if name in seen:
                 fail(f"archive contains duplicate path {name!r}")
             seen.add(name)
-            mode = stat.S_IMODE(member.mode)
+            if name not in expected:
+                fail(f"archive contains unexpected path {name!r}")
+            expected_type, expected_mode = expected[name]
+            actual_type = "directory" if member.isdir() else "file" if member.isfile() else "unsafe"
+            if actual_type != expected_type:
+                fail(f"archive path has an unsafe type: {name!r}")
+            if member.uid != 0 or member.gid != 0 or stat.S_IMODE(member.mode) != expected_mode:
+                fail(f"archive path has unsafe ownership or mode: {name!r}")
             if member.isdir():
-                if member.size != 0 or mode not in ALLOWED_DIRECTORY_MODES:
-                    fail(f"archive directory has unsafe metadata: {name!r}")
+                if member.size != 0:
+                    fail(f"archive directory has a non-zero size: {name!r}")
                 continue
-            if not member.isfile():
-                fail(f"archive contains unsupported entry type: {name!r}")
-            if mode not in ALLOWED_FILE_MODES:
-                fail(f"archive file has unsafe mode: {name!r}")
             if member.size < 0 or unpacked + member.size > MAX_UNPACKED_BYTES:
                 fail("archive expands beyond the supported size")
             unpacked += member.size
-            regular.add(name)
-    missing = PRODUCTS[product] - regular
+    if entry_count == 0:
+        fail("archive is empty")
+    missing = set(expected) - seen
     if missing:
-        fail(f"archive is missing required files: {sorted(missing)!r}")
+        fail(f"archive is missing required paths: {sorted(missing)!r}")
     if unpacked <= 0:
         fail("archive contains no regular-file data")
     return unpacked
@@ -155,4 +167,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

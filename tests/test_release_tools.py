@@ -28,16 +28,29 @@ def add_file(archive: tarfile.TarFile, name: str, content: bytes, mode: int = 0o
     archive.addfile(entry, io.BytesIO(content))
 
 
+def add_directory(archive: tarfile.TarFile, name: str) -> None:
+    entry = tarfile.TarInfo(name)
+    entry.type = tarfile.DIRTYPE
+    entry.mode = 0o755
+    entry.uid = 0
+    entry.gid = 0
+    archive.addfile(entry)
+
+
 class ManifestTests(unittest.TestCase):
     def make_remote_terminal_tar(self, directory: Path) -> tuple[Path, int]:
         path = directory / "payload.tar"
         bodies = {
             "bin/remoteterminal": b"application",
             "bin/ttyd": b"ttyd",
+            "licenses/ttyd-LICENSE": b"license\n",
             "manifest.json": b"{}\n",
             "metadata/build-inputs.json": b"{}\n",
         }
         with tarfile.open(path, "w:") as archive:
+            add_directory(archive, "bin")
+            add_directory(archive, "licenses")
+            add_directory(archive, "metadata")
             for name, content in bodies.items():
                 add_file(archive, name, content, 0o755 if name.startswith("bin/") else 0o644)
         return path, sum(map(len, bodies.values()))
@@ -107,6 +120,37 @@ class ManifestTests(unittest.TestCase):
                 with self.assertRaises(SystemExit):
                     CREATE_MANIFEST.validate_tar(path, "remoteterminal")
 
+    def test_extra_missing_and_non_root_entries_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            valid, _ = self.make_remote_terminal_tar(root)
+
+            missing = root / "missing.tar"
+            with tarfile.open(missing, "w:") as archive:
+                add_directory(archive, "bin")
+                add_file(archive, "bin/remoteterminal", b"app", 0o755)
+            with self.assertRaises(SystemExit):
+                CREATE_MANIFEST.validate_tar(missing, "remoteterminal")
+
+            extra = root / "extra.tar"
+            with tarfile.open(valid, "r:") as source, tarfile.open(extra, "w:") as destination:
+                for member in source:
+                    payload = source.extractfile(member) if member.isfile() else None
+                    destination.addfile(member, payload)
+                add_file(destination, "unexpected", b"x")
+            with self.assertRaises(SystemExit):
+                CREATE_MANIFEST.validate_tar(extra, "remoteterminal")
+
+            non_root = root / "non-root.tar"
+            with tarfile.open(valid, "r:") as source, tarfile.open(non_root, "w:") as destination:
+                for member in source:
+                    payload = source.extractfile(member) if member.isfile() else None
+                    if member.name == "manifest.json":
+                        member.uid = 1000
+                    destination.addfile(member, payload)
+            with self.assertRaises(SystemExit):
+                CREATE_MANIFEST.validate_tar(non_root, "remoteterminal")
+
     def test_bounded_decompressor_rejects_excess_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -134,4 +178,3 @@ class ManifestTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
